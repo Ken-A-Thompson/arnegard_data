@@ -272,14 +272,26 @@ scatter3d(Loess_Predicted_SL_mm~Buccal_Length.res+Gape.res, data=arnegard,
 ### Create df, and array of X &
 ### Note: Using wild fish
 
-arnegard.wild.XY.array <- na.omit(arnegard.wild[c(1:2, 50:51, 54:89)][-c(637:713),])
+arnegard.wild.XY.array <- na.omit(arnegard.wild[c(1:2, 50:51, 54:89)][-c(637:713),], stringsAsFactors = F)
 
-coords <- as.matrix(arnegard.XY.array[-1]) ## here we say, use all columns except the first two.
+arnegard.wild.XY.array <- arnegard.wild.XY.array %>% 
+  rename(ID = Individ_Num)
 
-is.numeric(coords)
-coords3D <- arrayspecs(coords, 19, 2) ## makes the matrix a 3D array
+arnegard.wild.coords <- as.matrix(arnegard.wild.XY.array[,-(1:2)]) # make it numeric
+is.numeric(coords) #check
 
-proc <- gpagen(coords3D)
+
+arnegard.wild.coords.3D <- arrayspecs(arnegard.wild.coords, 19, 2) ## makes the matrix a 3D array; # p = 19 is num measures and k=2 num of dimensions
+
+classifiers <- arnegard.wild.XY.array[,1:2]
+is.factor(classifiers$Group) #Verify that group is a factor
+
+# Can split by factor... not sure if this is what I want
+arnegard.wild.benthic <- coords.subset(A = arnegard.wild.coords.3D, group = classifiers$Group)
+
+## Generalized Procrustes Analysis 
+
+arnegard.Proc <- gpagen(arnegard.wild.coords.3D)
 coords2d <- two.d.array(proc$coords)
 
 consensus <- apply(proc$coords, c(1,2), mean)
