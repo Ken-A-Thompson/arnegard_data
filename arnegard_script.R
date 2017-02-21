@@ -1,8 +1,10 @@
 # Arnegard paper analysis
 
 library(car)
+library(dplyr)
 library(geomorph)
 library(ggplot2)
+library(MASS)
 library(MuMIn)
 library(psych)
 library(rgl)
@@ -11,8 +13,8 @@ library(scatterplot3d)
 arnegard.all <- read.csv('data-raw/arnegard_data.csv')
 
 ### Drop the non-experiment fish
-arnegard <- arnegard[-c(637:713),]
-arnegard.noA <- subset(arnegard, Fifteen_Percent_Loess_Curved_Landscape_Group == (c("B", "L", "O")))
+arnegard <- arnegard.all[-c(637:713),]
+arnegard.noO <- subset(arnegard, Fifteen_Percent_Loess_Curved_Landscape_Group == (c("B", "L", "A")))
 arnegard.L <- subset(arnegard, Fifteen_Percent_Loess_Curved_Landscape_Group == "L")
 arnegard.wild <- arnegard.all[c(674:713),]
 
@@ -37,48 +39,66 @@ ng1 <- theme(aspect.ratio=1.0,panel.background = element_blank(),
              plot.title = element_blank())
 
 #Isotope_PC1 is niche score; PC2 is deviation score
-#Use dredge to figure out what explains niche score
-#Run test model
-#
-multvardata <- na.omit((arnegard.BL[, (colnames(arnegard.BL) %in% c("PC1.abs", "PC2.abs", "Loess_Predicted_SL_mm", "Opening_Inlever.res", "Protrusion.res", "Buccal_Length.res", "Total_Long_Gill_Rakers", "Total_Short_Gill_Rakers", "Total_All_Gill_Rakers", "Gape.res", "Suction_Index", "Isotope_PC1"))]))
 
-biglm <- lm(Loess_Predicted_SL_mm ~ PC1.abs + PC2.abs + Opening_Inlever.res + Protrusion.res + Buccal_Length.res + Total_Long_Gill_Rakers + Total_Short_Gill_Rakers + Total_All_Gill_Rakers + Gape.res, data = arnegard)
-summary(biglm)
+#Run a PCA
+arnegard.morph.terms <- c("Std_Length_TPS1_to_TPS14_mm", "Opening_Inlever.res", "Protrusion.res", "Buccal_Length.res", "Total_Long_Gill_Rakers", "Total_Short_Gill_Rakers", "Total_All_Gill_Rakers", "Gape.res", "Suction_Index", "EpaxH.res")
+arnegard.matrix <- arnegard[arnegard.morph.terms]
+arnegard.pca <- principal(arnegard.matrix, nfactors = 2, rotate = "varimax")
+plot(arnegard.pca$scores)
 
 
-#Create "morphology" PCA
-#Identify terms for PCA
-arnegard.morphology.terms <- c("Opening_Inlever.res", "Protrusion.res", "Buccal_Length.res", "Total_Long_Gill_Rakers", "Total_Short_Gill_Rakers", "Gape.res", "Suction_Index", "EpaxH.res")
-#Run PCA using
-arnegard.morph.PCA <- principal(arnegard.noA[arnegard.morphology.terms], nfactors = 3, residuals = FALSE, rotate = "varimax", scores = TRUE, missing = FALSE)
-#See eigenvalues
-arnegard.morph.PCA$values
-#Create a 2xn matrix of PCA scores
-arnegard.pca <- arnegard.morph.PCA$scores
-#Attach matrix to main dataframe
-arnegard.noA <- cbind(arnegard.noA, arnegard.pca)
+# Generate DFA to dilineate B & L groups
+#First create dataset with just B and L
 
-#Use "predict" R command to figure out where everone falls along a benthic/limnetic axis. can do for LDA and also PCA.
+arnegard.BL <- arnegard %>%
+  group_by(Fifteen_Percent_Loess_Curved_Landscape_Group) %>% 
+  filter(Fifteen_Percent_Loess_Curved_Landscape_Group == "L" | Fifteen_Percent_Loess_Curved_Landscape_Group == "B")
 
-ggplot(arnegard, aes(x=Isotope_PC1, y=Isotope_PC, colour = Fifteen_Percent_Loess_Curved_Landscape_Group)) +
+#Create dataset with B, L and then 'other'
+arnegard.3G <- arnegard %>%
+  group_by(Fifteen_Percent_Loess_Curved_Landscape_Group) %>%
+  mutate(Loess.3G = revalue(Fifteen_Percent_Loess_Curved_Landscape_Group, c("A" = "O")))
+
+#Run DFA
+z.noO <- lda(Fifteen_Percent_Loess_Curved_Landscape_Group ~ Std_Length_TPS1_to_TPS14_mm + Opening_Inlever.res + Protrusion.res + Buccal_Length.res + Total_Long_Gill_Rakers + Total_Short_Gill_Rakers + Total_All_Gill_Rakers + Gape.res + Suction_Index + EpaxH.res, data = arnegard.noO)
+
+z.3G <- lda(Loess.3G ~ Std_Length_TPS1_to_TPS14_mm + Opening_Inlever.res + Protrusion.res + Buccal_Length.res + Total_All_Gill_Rakers + Gape.res + Suction_Index + EpaxH.res, data = arnegard.3G)
+
+#Can do two or three groups
+plot(z.3G)
+print(z)
+z$scaling
+
+LD.scores <- predict(z.3G)$x
+z.3G$class
+
+#Make dataset with groups and plot
+z1 <- predict(z.3G, arnegard.3G)
+z1 <- as.data.frame(z1)
+
+#Bring in 'fitness' column
+z1$fitness <- arnegard.3G$Loess_Predicted_SL_mm
+
+#Also group column
+z1$group <- arnegard.3G$Loess.3G
+
+#Plot the LDs and circle...
+
+ggplot(z1, aes(x.LD1, x.LD2, color = group)) +
   geom_point() +
   stat_ellipse()
 
-#Rc1 & Rc3 tell them apart...
-TukeyHSD(aov(RC1 ~ Fifteen_Percent_Loess_Curved_Landscape_Group, data = arnegard.noA))
+#See if the groups fall out on LDs
+TukeyHSD(aov(x.LD1 ~ group, data = z1))
 
-#What PC separates benthic/limnetic?
-plot(arnegard.w.pca$Fifteen_Percent_Loess_Curved_Landscape_Group, arnegard.w.pca$RC3)
-#RC3
-summary(aov(RC3 ~ Fifteen_Percent_Loess_Curved_Landscape_Group, arnegard.w.pca))
+#Look at scatterplot
+scatter3d(fitness~x.LD1+x.LD2, data=z1, 
+          fit="quadratic", residuals=TRUE, bg="white", axis.scales=TRUE, grid=TRUE, 
+          ellipsoid=FALSE)
 
-
-#Trying a DFA
-#Can i code A and O as 'O'"
-
-z <- lda(Fifteen_Percent_Loess_Curved_Landscape_Group ~ Opening_Inlever.res + Protrusion.res + Buccal_Length.res + Total_Long_Gill_Rakers + Total_Short_Gill_Rakers + Total_All_Gill_Rakers + Gape.res, data = arnegard)
-
-plot(z, group=arnegard$Fifteen_Percent_Loess_Curved_Landscape_Group)
+#determine parameters
+summary(lm(fitness ~ abs(x.LD2), data = z1))
+summary(lm(fitness ~ abs(x.LD1), data = z1))
 
 
 ###Some figures
@@ -243,9 +263,21 @@ scatter3d(Loess_Predicted_SL_mm~Isotope_PC1+Isotope_PC2, data=arnegard,
           fit="quadratic", residuals=TRUE, bg="white", axis.scales=TRUE, grid=TRUE, 
           ellipsoid=FALSE)
 
+### Cool fig with abs pcs
 scatter3d(Loess_Predicted_SL_mm~PC1.abs+PC2.abs, data=arnegard, 
           fit="quadratic", residuals=TRUE, bg="white", axis.scales=TRUE, grid=TRUE, 
           ellipsoid=FALSE)
+
+### same as above but with real length
+scatter3d(Std_Length_TPS1_to_TPS14_mm~PC1.abs+PC2.abs, data=arnegard, 
+          fit="quadratic", residuals=TRUE, bg="white", axis.scales=TRUE, grid=TRUE, 
+          ellipsoid=FALSE)
+
+scatter3d(Std_Length_TPS1_to_TPS14_mm~Opening_Inlever.res+Protrusion.res, data=arnegard, 
+          fit="quadratic", residuals=TRUE, bg="white", axis.scales=TRUE, grid=TRUE, 
+          ellipsoid=FALSE)
+
+summary(aov(Std_Length_TPS1_to_TPS14_mm~Isotope_PC1*Isotope_PC2, data=arnegard))
 
 #3D version of arnegard figure
 scatter3d(Loess_Predicted_SL_mm~Isotope_PC1+Isotope_PC2, data=arnegard, 
